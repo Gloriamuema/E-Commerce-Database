@@ -1,0 +1,263 @@
+-- ecommerce_schema.sql
+-- E-Commerce Database Schema (MySQL / InnoDB)
+-- Contains CREATE DATABASE, CREATE TABLE statements, and relationship constraints.
+
+-- 1) Create database and use it
+CREATE DATABASE IF NOT EXISTS ecommerce_db
+  CHARACTER SET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
+USE ecommerce_db;
+
+-- 2) Core user/customer tables
+CREATE TABLE users (
+  user_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  email VARCHAR(255) NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_login DATETIME NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  PRIMARY KEY (user_id),
+  UNIQUE KEY uq_users_email (email)
+) ENGINE=InnoDB;
+
+-- One-to-one: user profile (optional profile details)
+CREATE TABLE customer_profiles (
+  user_id INT UNSIGNED NOT NULL,
+  first_name VARCHAR(100) NULL,
+  last_name VARCHAR(100) NULL,
+  phone VARCHAR(30) NULL,
+  date_of_birth DATE NULL,
+  PRIMARY KEY (user_id),
+  CONSTRAINT fk_profiles_user FOREIGN KEY (user_id)
+    REFERENCES users (user_id) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB;
+
+-- 3) Categories and suppliers
+CREATE TABLE categories (
+  category_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  name VARCHAR(150) NOT NULL,
+  slug VARCHAR(150) NOT NULL,
+  description TEXT NULL,
+  parent_id INT UNSIGNED NULL,
+  PRIMARY KEY (category_id),
+  UNIQUE KEY uq_categories_slug (slug),
+  CONSTRAINT fk_categories_parent FOREIGN KEY (parent_id)
+    REFERENCES categories (category_id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE suppliers (
+  supplier_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  name VARCHAR(255) NOT NULL,
+  contact_email VARCHAR(255) NULL,
+  phone VARCHAR(50) NULL,
+  address TEXT NULL,
+  PRIMARY KEY (supplier_id),
+  UNIQUE KEY uq_suppliers_name (name)
+) ENGINE=InnoDB;
+
+-- 4) Products (many-to-one to category, supplier)
+CREATE TABLE products (
+  product_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  sku VARCHAR(100) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  category_id INT UNSIGNED NULL,
+  supplier_id INT UNSIGNED NULL,
+  price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (product_id),
+  UNIQUE KEY uq_products_sku (sku),
+  KEY idx_products_category (category_id),
+  KEY idx_products_supplier (supplier_id),
+  CONSTRAINT fk_products_category FOREIGN KEY (category_id)
+    REFERENCES categories (category_id) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT fk_products_supplier FOREIGN KEY (supplier_id)
+    REFERENCES suppliers (supplier_id) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB;
+
+-- 5) Product images (one-to-many)
+CREATE TABLE product_images (
+  image_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  product_id INT UNSIGNED NOT NULL,
+  url VARCHAR(1000) NOT NULL,
+  alt_text VARCHAR(255) NULL,
+  is_primary TINYINT(1) NOT NULL DEFAULT 0,
+  sort_order INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (image_id),
+  KEY idx_product_images_product (product_id),
+  CONSTRAINT fk_product_images_product FOREIGN KEY (product_id)
+    REFERENCES products (product_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 6) Inventory (one-to-one or one-to-many depending on design; here one record per product)
+CREATE TABLE inventory (
+  product_id INT UNSIGNED NOT NULL,
+  quantity INT NOT NULL DEFAULT 0,
+  reorder_level INT NOT NULL DEFAULT 10,
+  last_restocked DATETIME NULL,
+  PRIMARY KEY (product_id),
+  CONSTRAINT fk_inventory_product FOREIGN KEY (product_id)
+    REFERENCES products (product_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 7) Tags and Product-Tags many-to-many
+CREATE TABLE tags (
+  tag_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  name VARCHAR(100) NOT NULL,
+  slug VARCHAR(100) NOT NULL,
+  PRIMARY KEY (tag_id),
+  UNIQUE KEY uq_tags_slug (slug)
+) ENGINE=InnoDB;
+
+CREATE TABLE product_tags (
+  product_id INT UNSIGNED NOT NULL,
+  tag_id INT UNSIGNED NOT NULL,
+  PRIMARY KEY (product_id, tag_id),
+  KEY idx_product_tags_tag (tag_id),
+  CONSTRAINT fk_pt_product FOREIGN KEY (product_id)
+    REFERENCES products (product_id) ON DELETE CASCADE,
+  CONSTRAINT fk_pt_tag FOREIGN KEY (tag_id)
+    REFERENCES tags (tag_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 8) Addresses (a user may have many addresses)
+CREATE TABLE addresses (
+  address_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id INT UNSIGNED NOT NULL,
+  label VARCHAR(50) NULL, -- e.g., "Home", "Office"
+  line1 VARCHAR(255) NOT NULL,
+  line2 VARCHAR(255) NULL,
+  city VARCHAR(100) NOT NULL,
+  state VARCHAR(100) NULL,
+  postal_code VARCHAR(50) NULL,
+  country VARCHAR(100) NOT NULL,
+  is_primary TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (address_id),
+  KEY idx_addresses_user (user_id),
+  CONSTRAINT fk_addresses_user FOREIGN KEY (user_id)
+    REFERENCES users (user_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 9) Orders (one-to-many: user -> orders)
+CREATE TABLE orders (
+  order_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id INT UNSIGNED NOT NULL,
+  order_number VARCHAR(50) NOT NULL,
+  status ENUM('PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REFUNDED') NOT NULL DEFAULT 'PENDING',
+  total_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  shipping_address_id INT UNSIGNED NULL,
+  billing_address_id INT UNSIGNED NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NULL ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (order_id),
+  UNIQUE KEY uq_orders_number (order_number),
+  KEY idx_orders_user (user_id),
+  CONSTRAINT fk_orders_user FOREIGN KEY (user_id)
+    REFERENCES users (user_id) ON DELETE RESTRICT,
+  CONSTRAINT fk_orders_shipping_addr FOREIGN KEY (shipping_address_id)
+    REFERENCES addresses (address_id) ON DELETE SET NULL,
+  CONSTRAINT fk_orders_billing_addr FOREIGN KEY (billing_address_id)
+    REFERENCES addresses (address_id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- 10) Order items (one-to-many: order -> order_items)
+CREATE TABLE order_items (
+  order_item_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  order_id BIGINT UNSIGNED NOT NULL,
+  product_id INT UNSIGNED NOT NULL,
+  quantity INT NOT NULL DEFAULT 1,
+  item_price DECIMAL(12,2) NOT NULL DEFAULT 0.00, -- price at time of order
+  item_total DECIMAL(12,2) AS (quantity * item_price) VIRTUAL, -- computed column
+  PRIMARY KEY (order_item_id),
+  KEY idx_order_items_order (order_id),
+  KEY idx_order_items_product (product_id),
+  CONSTRAINT fk_order_items_order FOREIGN KEY (order_id)
+    REFERENCES orders (order_id) ON DELETE CASCADE,
+  CONSTRAINT fk_order_items_product FOREIGN KEY (product_id)
+    REFERENCES products (product_id) ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+
+-- 11) Payments (one-to-one or one-to-many depending on partial payments)
+CREATE TABLE payments (
+  payment_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  order_id BIGINT UNSIGNED NOT NULL,
+  payment_method ENUM('CREDIT_CARD','PAYPAL','BANK_TRANSFER','CASH_ON_DELIVERY') NOT NULL,
+  amount DECIMAL(12,2) NOT NULL,
+  currency CHAR(3) NOT NULL DEFAULT 'USD',
+  paid_at DATETIME NULL,
+  status ENUM('PENDING','COMPLETED','FAILED','REFUNDED') NOT NULL DEFAULT 'PENDING',
+  transaction_reference VARCHAR(255) NULL,
+  PRIMARY KEY (payment_id),
+  KEY idx_payments_order (order_id),
+  CONSTRAINT fk_payments_order FOREIGN KEY (order_id)
+    REFERENCES orders (order_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 12) Reviews (user reviews products) - one-to-many
+CREATE TABLE reviews (
+  review_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  product_id INT UNSIGNED NOT NULL,
+  user_id INT UNSIGNED NOT NULL,
+  rating TINYINT UNSIGNED NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  title VARCHAR(255) NULL,
+  body TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (review_id),
+  UNIQUE KEY uq_reviews_user_product (product_id, user_id),
+  KEY idx_reviews_product (product_id),
+  CONSTRAINT fk_reviews_product FOREIGN KEY (product_id)
+    REFERENCES products (product_id) ON DELETE CASCADE,
+  CONSTRAINT fk_reviews_user FOREIGN KEY (user_id)
+    REFERENCES users (user_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 13) Shopping cart and cart items (transient by design)
+CREATE TABLE carts (
+  cart_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id INT UNSIGNED NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NULL ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (cart_id),
+  KEY idx_carts_user (user_id),
+  CONSTRAINT fk_carts_user FOREIGN KEY (user_id)
+    REFERENCES users (user_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE cart_items (
+  cart_item_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  cart_id BIGINT UNSIGNED NOT NULL,
+  product_id INT UNSIGNED NOT NULL,
+  quantity INT NOT NULL DEFAULT 1,
+  PRIMARY KEY (cart_item_id),
+  KEY idx_cart_items_cart (cart_id),
+  KEY idx_cart_items_product (product_id),
+  CONSTRAINT fk_cart_items_cart FOREIGN KEY (cart_id)
+    REFERENCES carts (cart_id) ON DELETE CASCADE,
+  CONSTRAINT fk_cart_items_product FOREIGN KEY (product_id)
+    REFERENCES products (product_id) ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+-- 14) Audit / logs (simple table)
+CREATE TABLE audit_logs (
+  log_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id INT UNSIGNED NULL,
+  action VARCHAR(255) NOT NULL,
+  object_type VARCHAR(100) NULL,
+  object_id VARCHAR(100) NULL,
+  details JSON NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (log_id),
+  KEY idx_audit_user (user_id),
+  CONSTRAINT fk_audit_user FOREIGN KEY (user_id)
+    REFERENCES users (user_id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- 15) Useful sample indexes (additional)
+ALTER TABLE products ADD INDEX idx_products_name (name(100));
+ALTER TABLE orders ADD INDEX idx_orders_created_at (created_at);
+ALTER TABLE inventory ADD INDEX idx_inventory_quantity (quantity);
+
+-- End of schema
